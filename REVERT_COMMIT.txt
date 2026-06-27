@@ -1,1 +1,0 @@
-Reverting to commit 2a76526ef512d8fe30bc3106e5b6a8bbd3427856 (Viewport Scaling for Mobile)
