@@ -1,5 +1,5 @@
 const { useState, useEffect } = React;
-//Testing
+
 // --- Helper Functions ---
 const getDamageSymbol = (s) => ["", "/", "X", "✱"][s] || "";
 
