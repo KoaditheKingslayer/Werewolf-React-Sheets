@@ -10,7 +10,311 @@
 </head>
 <body>
     <div id="root"></div>
-    <script type="text/babel" src="App.js"></script>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+//Testing
+// --- Helper Functions ---
+const getDamageSymbol = (s) => ["", "/", "X", "✱"][s] || "";
+
+// --- Sub-Components ---
+const StatDot = ({ filled, onClick, color = "#e94560", locked }) => (
+    <div 
+        className={`dot ${filled ? 'filled' : ''} ${locked ? 'locked' : ''}`} 
+        style={filled ? { backgroundColor: color, boxShadow: `0 0 8px ${color}` } : { borderColor: color }}
+        onClick={locked ? null : onClick} 
+    />
+);
+
+const Trait = ({ label, value, specialty, onUpdate, locked }) => (
+    <div className="trait">
+        <div className="trait-header">
+            <span className="trait-label">{label}</span>
+            <div className="dots-row">
+                {[1, 2, 3, 4, 5].map(i => (
+                    <StatDot key={i} locked={locked} filled={i <= value} onClick={() => onUpdate('value', (i === 1 && value === 1) ? 0 : i)} />
+                ))}
+            </div>
+        </div>
+        <input className="specialty" placeholder="Specialty" disabled={locked} value={specialty} onChange={(e) => onUpdate('specialty', e.target.value)} />
+    </div>
+);
+
+const AdvantageRow = ({ name, dots, onUpdate, onDelete, locked }) => (
+    <div className="advantage-row">
+        <input className="adv-name" value={name} disabled={locked} onChange={(e) => onUpdate('name', (e.target.value))} placeholder="Name..." />
+        <div className="dots-row">
+            {[1, 2, 3, 4, 5].map(i => (
+                <StatDot key={i} locked={locked} filled={i <= dots} onClick={() => onUpdate('dots', (i === 1 && dots === 1) ? 0 : i)} />
+            ))}
+        </div>
+        {!locked && <button className="del-btn" onClick={onDelete}>×</button>}
+    </div>
+);
+
+function App() {
+    const [isLocked, setIsLocked] = useState(false);
+    const [activeForm, setActiveForm] = useState("Homid");
+    const [isTrayOpen, setIsTrayOpen] = useState(false);
+    
+    const [selectedAttr, setSelectedAttr] = useState(["Physical", "Strength"]);
+    const [selectedAbil, setSelectedAbil] = useState(["Talents", "Alertness"]);
+    const [difficulty, setDifficulty] = useState(6);
+    const [useSpecialty, setUseSpecialty] = useState(false);
+    const [useWillpower, setUseWillpower] = useState(false);
+    const [bonusDice, setBonusDice] = useState(0);
+    const [isSingleRoll, setIsSingleRoll] = useState(false);
+    const [rollResult, setRollResult] = useState(null);
+
+    const forms = {
+        Homid: { str: 0, dex: 0, sta: 0, man: 0, app: null, note: "Default Sheet" },
+        Glabro: { str: 2, dex: 0, sta: 2, man: -2, app: -1, note: "\u00A0" },
+        Crinos: { str: 4, dex: 1, sta: 3, man: -3, app: 0, note: "Incites Delirium" },
+        Hispo: { str: 3, dex: 2, sta: 3, man: -3, app: null, note: "+1 Die to Bite Damage" },
+        Lupus: { str: 1, dex: 2, sta: 2, man: -3, app: null, note: "-2 Perception Check diff" }
+    };
+
+    const [char, setChar] = useState({
+        Info: { Name: "", Breed: "", Auspice: "", Tribe: "", Concept: "", Pack: "" },
+        Attributes: {
+            Physical: { Strength: {v:1,s:""}, Dexterity: {v:1,s:""}, Stamina: {v:1,s:""} },
+            Social: { Charisma: {v:1,s:""}, Manipulation: {v:1,s:""}, Appearance: {v:1,s:""} },
+            Mental: { Perception: {v:1,s:""}, Intelligence: {v:1,s:""}, Wits: {v:1,s:""} }
+        },
+        Abilities: {
+            Talents: { Alertness: {v:0,s:""}, Athletics: {v:0,s:""}, Brawl: {v:0,s:""}, Empathy: {v:0,s:""}, Expression: {v:0,s:""}, Intimidation: {v:0,s:""}, Leadership: {v:0,s:""}, "Primal-Urge": {v:0,s:""}, Streetwise: {v:0,s:""}, Subterfuge: {v:0,s:""} },
+            Skills: { "Animal Ken": {v:0,s:""}, Crafts: {v:0,s:""}, Drive: {v:0,s:""}, Etiquette: {v:0,s:""}, Firearms: {v:0,s:""}, Larceny: {v:0,s:""}, Melee: {v:0,s:""}, Performance: {v:0,s:""}, Stealth: {v:0,s:""}, Survival: {v:0,s:""} },
+            Knowledges: { Academics: {v:0,s:""}, Computer: {v:0,s:""}, Enigmas: {v:0,s:""}, Investigation: {v:0,s:""}, Law: {v:0,s:""}, Medicine: {v:0,s:""}, Occult: {v:0,s:""}, Rituals: {v:0,s:""}, Science: {v:0,s:""}, Technology: {v:0,s:""} }
+        },
+        Advantages: { Backgrounds: [], Gifts: [], Rites: [] },
+        Renown: { Glory: {perm: 0, temp: 0}, Honor: {perm: 0, temp: 0}, Wisdom: {perm: 0, temp: 0}, Rank: 1 },
+        Tracks: { 
+            Rage: {perm: 0, temp: 0}, Gnosis: {perm: 0, temp: 0}, Willpower: {perm: 0, temp: 0}, 
+            Health: [
+                { label: "Bruised", penalty: "0", boxes: [0] }, { label: "Hurt", penalty: "-1", boxes: [0] },
+                { label: "Injured", penalty: "-1", boxes: [0] }, { label: "Wounded", penalty: "-2", boxes: [0] },
+                { label: "Mauled", penalty: "-2", boxes: [0] }, { label: "Crippled", penalty: "-5", boxes: [0] },
+                { label: "Incap", penalty: "X", boxes: [0] }
+            ] 
+        }
+    });
+
+    const getMod = (formKey, attrName) => {
+        const f = forms[formKey];
+        const name = attrName.toLowerCase();
+        if (name === "appearance" && f.app === 0) return { override: 0 };
+        if (name === "strength") return { mod: f.str };
+        if (name === "dexterity") return { mod: f.dex };
+        if (name === "stamina") return { mod: f.sta };
+        if (name === "manipulation") return { mod: f.man };
+        if (name === "appearance" && f.app !== null) return { mod: f.app };
+        return { mod: 0 };
+    };
+
+    const rollDice = () => {
+        let poolSize = 0;
+        const getRawVal = (cat, trait) => {
+            if (cat === "Tracks") return char.Tracks[trait].temp;
+            if (char.Attributes[cat]) return char.Attributes[cat][trait].v;
+            if (char.Abilities[cat]) return char.Abilities[cat][trait].v;
+            return 0;
+        };
+
+        const attrBase = getRawVal(selectedAttr[0], selectedAttr[1]);
+        const { mod = 0, override = null } = getMod(activeForm, selectedAttr[1]);
+        const finalAttr = override !== null ? override : (attrBase + mod);
+
+        if (isSingleRoll) {
+            poolSize = finalAttr;
+        } else {
+            poolSize = finalAttr + getRawVal(selectedAbil[0], selectedAbil[1]);
+        }
+
+        poolSize += parseInt(bonusDice) || 0;
+        poolSize = Math.max(poolSize, 0);
+
+        let rolls = Array.from({ length: poolSize }, () => Math.floor(Math.random() * 10) + 1).sort((a,b)=>b-a);
+        let successes = 0, ones = 0;
+
+        const formatted = rolls.map(r => {
+            if (r === 1) { ones++; return `{${r}}`; }
+            if (r === 10) { successes += useSpecialty ? 2 : 1; return `[${r}]`; }
+            if (r >= difficulty) { successes++; return `[${r}]`; }
+            return `${r}`;
+        });
+
+        if (useWillpower) { successes++; formatted.unshift("[W]"); }
+        const net = Math.max(successes - ones, 0);
+        const botch = (successes === 0 && ones > 0 && !useWillpower);
+
+        setRollResult({ name: char.Info.Name || "Garou", rolls: formatted, net, botch, pool: poolSize, diff: difficulty, wp: useWillpower, spec: useSpecialty, form: activeForm });
+        setIsTrayOpen(true);
+    };
+
+    const saveSheet = () => {
+        const data = JSON.stringify({char, activeForm}, null, 2);
+        const blob = new Blob([data], {type: "application/json"});
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${char.Info.Name || 'Garou'}_sheet.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    };
+
+    const loadSheet = (event) => {
+        const fileReader = new FileReader();
+        if(!event.target.files[0]) return;
+        fileReader.readAsText(event.target.files[0], "UTF-8");
+        fileReader.onload = e => {
+            try {
+                const json = JSON.parse(e.target.result);
+                setChar(json.char);
+                setActiveForm(json.activeForm || "Homid");
+            } catch (err) { alert("Error loading file."); }
+        };
+    };
+
+    return (
+        <div className="sheet">
+            <div className="toolbar">
+                <button className={`lock-btn ${isLocked ? 'locked' : ''}`} onClick={() => setIsLocked(!isLocked)}>
+                    {isLocked ? "🔒 UNLOCK" : "🔓 LOCK"}
+                </button>
+                <div className="io-buttons">
+                    <button onClick={saveSheet}>💾 Save</button>
+                    <label className="load-label">📂 Load <input type="file" onChange={loadSheet} style={{display:'none'}} /></label>
+                </div>
+            </div>
+
+            <h1>W20 Tracker</h1>
+            <div className="info-grid">
+                {Object.keys(char.Info).map(k => (
+                    <div key={k} className="info-box"><label>{k}</label>
+                    <input value={char.Info[k]} disabled={isLocked} onChange={(e) => setChar({...char, Info: {...char.Info, [k]: e.target.value}})} /></div>
+                ))}
+            </div>
+
+            <div className="section-header">Attributes</div>
+            <div className="triple-flex">
+                {Object.keys(char.Attributes).map(cat => (
+                    <div className="column" key={cat}><h3 className="column-title">{cat}</h3>
+                        {Object.keys(char.Attributes[cat]).map(t => (
+                            <Trait key={t} label={t} locked={isLocked} value={char.Attributes[cat][t].v} specialty={char.Attributes[cat][t].s} onUpdate={(f, v) => setChar(prev => ({...prev, Attributes: {...prev.Attributes, [cat]: {...prev.Attributes[cat], [t]: {...prev.Attributes[cat][t], [f === 'value' ? 'v' : 's']: v}}}}))} />
+                        ))}
+                    </div>
+                ))}
+            </div>
+
+            <div className="section-header">Abilities</div>
+            <div className="triple-flex">
+                {Object.keys(char.Abilities).map(cat => (
+                    <div className="column" key={cat}><h3 className="column-title">{cat}</h3>
+                        {Object.keys(char.Abilities[cat]).map(t => (
+                            <Trait key={t} label={t} locked={isLocked} value={char.Abilities[cat][t].v} specialty={char.Abilities[cat][t].s} onUpdate={(f, v) => setChar(prev => ({...prev, Abilities: {...prev.Abilities, [cat]: {...prev.Abilities[cat], [t]: {...prev.Abilities[cat][t], [f === 'value' ? 'v' : 's']: v}}}}))} />
+                        ))}
+                    </div>
+                ))}
+            </div>
+
+            <div className="section-header">Advantages</div>
+            <div className="triple-flex">
+                {['Backgrounds', 'Gifts', 'Rites'].map(type => (
+                    <div className="column" key={type}><div className="column-header-row"><h3 className="column-title">{type}</h3>
+                        {!isLocked && <button className="add-btn" onClick={() => setChar({...char, Advantages: {...char.Advantages, [type]: [...char.Advantages[type], { name: "", dots: 0 }]}})}>+</button>}
+                    </div>
+                    {char.Advantages[type].map((adv, i) => (
+                        <AdvantageRow key={i} locked={isLocked} name={adv.name} dots={adv.dots} onUpdate={(f, v) => {const n=[...char.Advantages[type]]; n[i][f]=v; setChar({...char, Advantages:{...char.Advantages, [type]:n}})}} onDelete={() => setChar({...char, Advantages:{...char.Advantages, [type]:char.Advantages[type].filter((_, idx)=>idx!==i)}})} />
+                    ))}</div>
+                ))}
+            </div>
+
+            <div className="section-header">Status & Health</div>
+            <div className="triple-flex">
+                <div className="column"><h3 className="column-title">Renown</h3>
+                    {['Glory', 'Honor', 'Wisdom'].map(r => (
+                        <div className="dual-track" key={r}><div className="track-label">{r}</div>
+                            <div className="dots-row">{[1,2,3,4,5,6,7,8,9,10].map(i => <StatDot key={i} locked={isLocked} filled={i <= char.Renown[r].perm} onClick={() => setChar({...char, Renown: {...char.Renown, [r]: {...char.Renown[r], perm: (i === 1 && char.Renown[r].perm === 1) ? 0 : i}}})} />)}</div>
+                            <div className="boxes-row">{[1,2,3,4,5,6,7,8,9,10].map(i => <div key={i} className={`temp-box ${i <= char.Renown[r].temp ? 'on' : ''}`} onClick={() => setChar({...char, Renown: {...char.Renown, [r]: {...char.Renown[r], temp: (i === 1 && char.Renown[r].temp === 1) ? 0 : i}}})} />)}</div>
+                        </div>
+                    ))}
+                </div>
+                <div className="column"><h3 className="column-title">Tempers</h3>
+                    {['Rage', 'Gnosis', 'Willpower'].map(s => (
+                        <div className="dual-track" key={s}><div className="track-label">{s}</div>
+                            <div className="dots-row">{[1,2,3,4,5,6,7,8,9,10].map(i => <StatDot key={i} locked={isLocked} filled={i <= char.Tracks[s].perm} onClick={() => setChar({...char, Tracks: {...char.Tracks, [s]: {...char.Tracks[s], perm: (i === 1 && char.Tracks[s].perm === 1) ? 0 : i}}})} />)}</div>
+                            <div className="boxes-row">{[1,2,3,4,5,6,7,8,9,10].map(i => <div key={i} className={`temp-box ${i <= char.Tracks[s].temp ? 'on' : ''}`} onClick={() => setChar({...char, Tracks: {...char.Tracks, [s]: {...char.Tracks[s], temp: (i === 1 && char.Tracks[s].temp === 1) ? 0 : i}}})} />)}</div>
+                        </div>
+                    ))}
+                </div>
+                <div className="column"><h3 className="column-title">Health</h3>
+                    {char.Tracks.Health.map((row, rIdx) => (
+                        <div key={row.label} className="health-row-container">
+                            <div className="health-label-group"><span className="h-name">{row.label}</span><span className="h-penalty">{row.penalty}</span></div>
+                            <div className="health-interactive"><div className="health-boxes-group">
+                                {row.boxes.map((state, bIdx) => (
+                                    <div key={bIdx} className="health-box cycle" onClick={() => {const n=[...char.Tracks.Health]; n[rIdx].boxes[bIdx]=(n[rIdx].boxes[bIdx]+1)%4; setChar({...char, Tracks:{...char.Tracks, Health:n}});}}>{getDamageSymbol(state)}</div>
+                                ))}</div>
+                                {!isLocked && <div className="health-mods"><button onClick={() => {const n=[...char.Tracks.Health]; n[rIdx].boxes.push(0); setChar({...char, Tracks:{...char.Tracks, Health:n}})}}>+</button><button onClick={() => {const n=[...char.Tracks.Health]; if(n[rIdx].boxes.length > 1){n[rIdx].boxes.pop(); setChar({...char, Tracks:{...char.Tracks, Health:n}})}}}>-</button></div>}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            <div className="section-header">Form Picker</div>
+            <div className="form-picker-grid">
+                {Object.keys(forms).map(f => {
+                    const mods = [{l:"Str", k:"Strength", m:forms[f].str, c:"Physical"}, {l:"Dex", k:"Dexterity", m:forms[f].dex, c:"Physical"}, {l:"Sta", k:"Stamina", m:forms[f].sta, c:"Physical"}, {l:"Man", k:"Manipulation", m:forms[f].man, c:"Social"}, {l:"App", k:"Appearance", m:forms[f].app, c:"Social"}].filter(x => x.m !== null && (x.m !== 0 || (x.l === "App" && forms[f].app === 0)));
+                    return (
+                        <div key={f} className={`form-card ${activeForm===f?'active':''}`} onClick={()=>setActiveForm(f)}>
+                            <div className="form-name">{f}</div>
+                            <div className="form-stats-list">
+                                {f==="Homid" ? <div className="form-stat-line">No Modifiers</div> : mods.map(m => (
+                                    <div key={m.l} className="form-stat-line">{m.l} {m.m>0?'+':''}{m.m} ({(m.l === "App" && m.m === 0) ? 0 : char.Attributes[m.c][m.k].v + m.m})</div>
+                                ))}
+                            </div>
+                            {forms[f].note && <div className="form-note">{forms[f].note}</div>}
+                        </div>
+                    );
+                })}
+            </div>
+
+            <div className={`dice-tray ${isTrayOpen ? 'open' : 'collapsed'}`}>
+                <div className="tray-header-bar" onClick={() => setIsTrayOpen(!isTrayOpen)}><h2>Dice Tray {isTrayOpen ? '▼' : '▲'}</h2></div>
+                {isTrayOpen && (
+                    <div className="tray-content">
+                        <div className="tray-row-flex"><label className="checkbox-label"><input type="checkbox" checked={isSingleRoll} onChange={()=>setIsSingleRoll(!isSingleRoll)}/> Single</label>
+                            <div className="input-group"><label>Diff</label><input type="number" value={difficulty} onChange={e=>setDifficulty(e.target.value)}/></div>
+                            <div className="input-group"><label>Bonus</label><input type="number" value={bonusDice} onChange={e=>setBonusDice(e.target.value)}/></div>
+                            <label className="checkbox-label"><input type="checkbox" checked={useSpecialty} onChange={()=>setUseSpecialty(!useSpecialty)}/> Spec</label>
+                            <label className="checkbox-label"><input type="checkbox" checked={useWillpower} onChange={()=>setUseWillpower(!useWillpower)}/> WP</label>
+                        </div>
+                        <div className="tray-row-flex">
+                            <select value={selectedAttr.join('|')} onChange={e=>setSelectedAttr(e.target.value.split('|'))}>
+                                <optgroup label="Attributes">{Object.keys(char.Attributes).map(c=>Object.keys(char.Attributes[c]).map(t=><option key={t} value={`${c}|${t}`}>{t}</option>))}</optgroup>
+                                <optgroup label="Tempers"><option value="Tracks|Rage">Rage</option><option value="Tracks|Gnosis">Gnosis</option><option value="Tracks|Willpower">Willpower</option></optgroup>
+                            </select>
+                            {!isSingleRoll && <select value={selectedAbil.join('|')} onChange={e=>setSelectedAbil(e.target.value.split('|'))}>{Object.keys(char.Abilities).map(c=>Object.keys(char.Abilities[c]).map(t=><option key={t} value={`${c}|${t}`}>{t}</option>))}</select>}
+                            <button className="roll-button" onClick={rollDice}>Roll</button>
+                        </div>
+                        {rollResult && (
+                            <div className="result-display">
+                                <div className="res-meta">{rollResult.form} | Pool {rollResult.pool} | Diff {rollResult.diff}</div>
+                                <div className="dice-list">{rollResult.rolls.join(', ')}</div>
+                                <div className={`outcome ${rollResult.botch?'botch':''}`}>{rollResult.net} Successes {rollResult.botch ? "(BOTCH)" : ""}</div>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+    </script>
 </body>
     
 </html>
